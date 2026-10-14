@@ -14,6 +14,8 @@ build/
 coverage/
 .DS_Store
 *.log
+*.sqlite
 *.sqlite3
+*.db
 .vscode/
 .idea/
