@@ -63,6 +63,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health_router)
+    app.include_router(health_router, prefix="/api")
     app.include_router(tasks_router, prefix="/api")
     app.include_router(ws_router, prefix="/api")
 
