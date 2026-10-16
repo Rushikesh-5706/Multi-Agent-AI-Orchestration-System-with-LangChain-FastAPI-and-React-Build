@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC
 
 from app.core.enums import EventType
 from app.db.repositories import add_agent_event
@@ -44,17 +43,9 @@ class EventPublisher:
             raise
 
         if self._manager is not None:
-            wire = {
-                "event_id": str(event.id),
-                "sequence": event.sequence,
-                "task_id": task_id,
-                "event_type": event_type.value,
-                "agent": agent_name,
-                "message": message,
-                "payload": full_payload,
-                "timestamp": event.timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
-                + "Z",
-            }
+            from app.api.serializers import serialize_event
+
+            wire = serialize_event(event)
             try:
                 await self._manager.broadcast(task_id, wire)
             except Exception as exc:

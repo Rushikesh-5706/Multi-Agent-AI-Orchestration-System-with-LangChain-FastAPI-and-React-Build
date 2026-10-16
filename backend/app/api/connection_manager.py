@@ -3,26 +3,29 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import UTC
+from typing import Any
 
+from app.api.serializers import serialize_event
 from app.core.enums import EventType
 
 logger = logging.getLogger(__name__)
 
-_TERMINAL_EVENT_TYPES = {EventType.COMPLETED.value, EventType.ERROR.value}
-
 
 class _Connection:
-    def __init__(self, ws, task_id: str):
+    def __init__(self, ws: Any, task_id: str):
         self.ws = ws
         self.task_id = task_id
         self.last_sequence: int = 0
         self._lock = asyncio.Lock()
 
-    async def send(self, data: dict) -> bool:
+    async def send(self, data: dict[str, Any]) -> bool:
         async with self._lock:
+            seq = data.get("sequence", 0)
+            if seq <= self.last_sequence:
+                return True
             try:
                 await self.ws.send_json(data)
+                self.last_sequence = seq
                 event_type = data.get("event_type")
                 is_fatal_error = event_type == "ERROR" and data.get("payload", {}).get("fatal")
                 if event_type == "COMPLETED" or is_fatal_error:
@@ -49,28 +52,18 @@ class ConnectionManager:
         if not self._connections[task_id]:
             del self._connections[task_id]
 
-    async def broadcast(self, task_id: str, message: dict) -> None:
-        seq = message.get("sequence", 0)
+    async def broadcast(self, task_id: str, message: dict[str, Any]) -> None:
         dead: list[_Connection] = []
 
         for conn in list(self._connections.get(task_id, set())):
-            if seq <= conn.last_sequence:
-                continue
             ok = await conn.send(message)
-            if ok:
-                conn.last_sequence = seq
-            else:
+            if not ok:
                 dead.append(conn)
 
         for conn in dead:
             self.remove(task_id, conn)
 
-    async def replay_and_stream(self, task_id: str, conn: _Connection, task_uuid) -> bool:
-        """Replay persisted events to the connection while holding its send lock.
-
-        Returns True if a terminal event (COMPLETED or fatal ERROR) was among
-        the replayed events, meaning the caller should close the socket.
-        """
+    async def replay_and_stream(self, task_id: str, conn: _Connection, task_uuid: Any) -> bool:
         from app.db.repositories import list_agent_events
 
         terminal_found = False
@@ -79,19 +72,7 @@ class ConnectionManager:
             events = await list_agent_events(task_uuid, after_sequence=0)
 
             for event in events:
-                wire = {
-                    "event_id": str(event.id),
-                    "sequence": event.sequence,
-                    "task_id": task_id,
-                    "event_type": event.event_type,
-                    "agent": event.agent_name,
-                    "message": event.payload.get("message", ""),
-                    "payload": event.payload,
-                    "timestamp": event.timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[
-                        :-3
-                    ]
-                    + "Z",
-                }
+                wire = serialize_event(event)
                 await conn.ws.send_json(wire)
                 conn.last_sequence = event.sequence
 

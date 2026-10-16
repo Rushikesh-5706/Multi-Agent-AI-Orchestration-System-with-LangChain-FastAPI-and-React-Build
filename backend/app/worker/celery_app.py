@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from celery import Celery
 
 from app.core.config import get_settings
@@ -27,6 +25,4 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     timezone="UTC",
     enable_utc=True,
-    task_always_eager=os.environ.get("CELERY_TASK_ALWAYS_EAGER", "false").lower()
-    in ("true", "1", "yes"),
 )

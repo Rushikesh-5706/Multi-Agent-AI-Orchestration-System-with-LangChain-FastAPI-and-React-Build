@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import UTC
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
@@ -63,19 +62,10 @@ async def get_task(task_id: str):
     if run is None:
         raise HTTPException(status_code=404, detail="Task not found.")
 
+    from app.api.serializers import serialize_event
+
     events = await list_agent_events(task_uuid)
-    events_data = [
-        {
-            "event_id": str(e.id),
-            "sequence": e.sequence,
-            "task_id": str(e.task_run_id),
-            "event_type": e.event_type,
-            "agent": e.agent_name,
-            "payload": e.payload,
-            "timestamp": e.timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-        }
-        for e in events
-    ]
+    events_data = [serialize_event(e) for e in events]
 
     return {
         "id": str(run.id),

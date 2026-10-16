@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import logging.config
 from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
@@ -63,7 +62,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health_router)
-    app.include_router(health_router, prefix="/api")
+    app.include_router(health_router, prefix="/api", include_in_schema=False)
     app.include_router(tasks_router, prefix="/api")
     app.include_router(ws_router, prefix="/api")
 

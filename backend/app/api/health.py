@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-import logging.config
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ async def health_check():
         db_status = "down"
         overall_ok = False
 
+    r = None
     try:
         import redis.asyncio as aioredis
 
@@ -36,11 +37,13 @@ async def health_check():
         settings = get_settings()
         r = aioredis.from_url(settings.REDIS_URL, socket_connect_timeout=2)
         await r.ping()
-        await r.aclose()
     except Exception as exc:
         logger.warning("Health check: redis down: %s", exc)
         redis_status = "down"
         overall_ok = False
+    finally:
+        if r is not None:
+            await r.aclose()
 
     body = {
         "status": "ok" if overall_ok else "degraded",
@@ -48,8 +51,7 @@ async def health_check():
         "redis": redis_status,
     }
     status_code = 200 if overall_ok else 503
-    return Response(
-        content=__import__("json").dumps(body),
+    return JSONResponse(
+        content=body,
         status_code=status_code,
-        media_type="application/json",
     )

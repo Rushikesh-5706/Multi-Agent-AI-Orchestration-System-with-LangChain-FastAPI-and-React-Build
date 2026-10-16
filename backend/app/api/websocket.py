@@ -9,14 +9,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api.connection_manager import _Connection, get_connection_manager
 from app.core.config import get_settings
-from app.core.enums import EventType
 from app.db.repositories import get_task_run
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_TERMINAL_EVENT_TYPES = {EventType.COMPLETED.value, EventType.ERROR.value}
 
 
 @router.websocket("/ws/{task_id}")
