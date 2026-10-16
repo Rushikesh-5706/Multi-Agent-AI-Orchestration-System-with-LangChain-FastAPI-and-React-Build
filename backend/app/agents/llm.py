@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from typing import Any
 
 import groq
 from langchain_groq import ChatGroq
@@ -16,10 +17,6 @@ class LLMConfigurationError(Exception):
     pass
 
 
-class LLMRateLimitError(Exception):
-    pass
-
-
 def build_llm() -> ChatGroq:
     settings = get_settings()
     return ChatGroq(
@@ -30,46 +27,64 @@ def build_llm() -> ChatGroq:
     )
 
 
-async def invoke_with_retry(llm, messages: list, publisher=None, task_id: str = "") -> object:
+async def invoke_with_retry(
+    llm: Any, messages: list[Any], publisher: Any = None, task_id: str = ""
+) -> Any:
     settings = get_settings()
     max_retries = settings.LLM_MAX_RETRIES
     backoff = 2.0
 
-    for attempt in range(max_retries + 1):
+    for attempt in range(max(max_retries, 5) + 1):
         try:
             return await llm.ainvoke(messages)
 
-        except groq.AuthenticationError as exc:
+        except (groq.AuthenticationError, groq.PermissionDeniedError) as exc:
             raise LLMConfigurationError(
                 f"Groq API key is invalid or not authorized: {exc}"
             ) from exc
 
         except groq.BadRequestError as exc:
-            exc_str = str(exc).lower()
-            if "tool_use_failed" in exc_str or "tool_calls" in exc_str or "tool" in exc_str:
-                if attempt < 2:
-                    corrective = {
-                        "role": "user",
-                        "content": (
-                            "Your previous tool call did not match the required schema. "
-                            "Please call the tool again using the exact field names and types "
-                            "specified in the tool definition. Do not add extra fields."
-                        ),
-                    }
-                    messages = list(messages) + [corrective]
-                    logger.warning("Tool schema error on attempt %d, retrying", attempt + 1)
-                    continue
+            code = None
+            if isinstance(exc.body, dict):
+                error_obj = exc.body.get("error")
+                if isinstance(error_obj, dict):
+                    code = error_obj.get("code")
+
+            if code == "tool_use_failed" and attempt < 2:
+                corrective = {
+                    "role": "user",
+                    "content": (
+                        "Your previous tool call did not match the required schema. "
+                        "Please call the tool again using the exact field names and types "
+                        "specified in the tool definition. Do not add extra fields."
+                    ),
+                }
+                messages = list(messages) + [corrective]
+                logger.warning("Tool schema error on attempt %d, retrying", attempt + 1)
+                continue
             raise
 
         except groq.RateLimitError as exc:
             rate_limit_max = max(max_retries, 5)
             if attempt >= rate_limit_max:
                 raise
-            wait = backoff * (2**attempt)
-            exc_str = str(exc)
-            match = re.search(r"(?:retry.after|try again in)[:\s]+(\d+(?:\.\d+)?)", exc_str)
-            if match:
-                wait = max(float(match.group(1)) + 0.5, 2.0)
+
+            wait = None
+            if exc.response is not None and "retry-after" in exc.response.headers:
+                try:
+                    wait = float(exc.response.headers["retry-after"])
+                except (ValueError, TypeError):
+                    wait = None
+
+            if wait is None:
+                match = re.search(r"try again in (\d+(?:\.\d+)?)s", str(exc), re.IGNORECASE)
+                if match:
+                    wait = float(match.group(1))
+
+            if wait is None:
+                wait = backoff * (2**attempt)
+
+            wait = min(wait, 60.0)
 
             if publisher and task_id:
                 from app.core.enums import EventType
@@ -92,7 +107,7 @@ async def invoke_with_retry(llm, messages: list, publisher=None, task_id: str = 
         ) as exc:
             if attempt >= max_retries:
                 raise
-            wait = backoff * (2**attempt)
+            wait = min(backoff * (2**attempt), 60.0)
             logger.warning(
                 "Transient LLM error '%s' on attempt %d, retrying in %.1fs",
                 type(exc).__name__,
