@@ -41,30 +41,36 @@ def test_web_search_empty():
 
 
 def test_web_search_ratelimit():
+    from ddgs.exceptions import RatelimitException
+
     with patch("ddgs.DDGS") as mock_ddgs:
         instance = mock_ddgs.return_value.__enter__.return_value
-        instance.text.side_effect = Exception("Ratelimit reached: 202 Ratelimit")
+        instance.text.side_effect = RatelimitException("Ratelimit reached: 202 Ratelimit")
 
         output = run_web_search("rate limit test")
         assert output.startswith("Error: DuckDuckGo rate limit reached.")
 
 
 def test_web_search_timeout():
+    from ddgs.exceptions import TimeoutException
+
     with patch("ddgs.DDGS") as mock_ddgs:
         instance = mock_ddgs.return_value.__enter__.return_value
-        instance.text.side_effect = Exception("Connection timed out")
+        instance.text.side_effect = TimeoutException("Connection timed out")
 
         output = run_web_search("timeout test")
         assert output.startswith("Error: Web search timed out.")
 
 
 def test_web_search_generic_error():
+    from ddgs.exceptions import DDGSException
+
     with patch("ddgs.DDGS") as mock_ddgs:
         instance = mock_ddgs.return_value.__enter__.return_value
-        instance.text.side_effect = RuntimeError("Something unexpected happened")
+        instance.text.side_effect = DDGSException("Something unexpected happened")
 
         output = run_web_search("generic error test")
-        assert output.startswith("Error: Web search failed (RuntimeError).")
+        assert output.startswith("Error: Web search failed (DDGSException).")
 
 
 def test_web_search_truncation(monkeypatch):

@@ -20,29 +20,29 @@ def run_web_search(query: str, max_results: int = 3) -> str:
 
     try:
         from ddgs import DDGS
+        from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
     except ImportError:
         return "Error: The ddgs package is not installed. Cannot perform web search."
 
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
-    except Exception as exc:
-        exc_type = type(exc).__name__
-        msg = str(exc).lower()
-        if "ratelimit" in msg or "rate limit" in msg or "rate_limit" in exc_type.lower():
-            return (
-                "Error: DuckDuckGo rate limit reached. Wait a moment and retry with the same "
-                "query, or rephrase the query."
-            )
-        if "timeout" in msg or "timed out" in msg:
-            return (
-                "Error: Web search timed out. Retry with a simpler query, or try a different tool."
-            )
+    except RatelimitException:
+        return (
+            "Error: DuckDuckGo rate limit reached. Wait a moment and retry with the same "
+            "query, or rephrase the query."
+        )
+    except TimeoutException:
+        return "Error: Web search timed out. Retry with a simpler query, or try a different tool."
+    except DDGSException as exc:
         logger.warning("DuckDuckGo search error for query '%s': %s", query, exc)
         return (
-            f"Error: Web search failed ({exc_type}). Retry with a different query or "
+            f"Error: Web search failed ({type(exc).__name__}). Retry with a different query or "
             "use another tool to gather the information."
         )
+    except Exception as exc:
+        logger.warning("Unexpected search error for query '%s': %s", query, exc, exc_info=True)
+        return f"Error: Web search failed unexpectedly ({type(exc).__name__}). Retry with a different query."
 
     if not results:
         return (

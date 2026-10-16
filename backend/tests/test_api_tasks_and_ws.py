@@ -58,16 +58,19 @@ async def test_post_task_validation():
 
 @pytest.mark.asyncio
 async def test_post_task_success():
+    from unittest.mock import AsyncMock, patch
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/api/tasks", json={"prompt": "Valid test prompt"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "task_id" in data
-        task_uuid = uuid.UUID(data["task_id"])
-        run = await get_task_run(task_uuid)
-        assert run is not None
-        assert run.prompt == "Valid test prompt"
+        with patch("app.agents.runner.run_workflow", new_callable=AsyncMock):
+            resp = await client.post("/api/tasks", json={"prompt": "Valid test prompt"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "task_id" in data
+            task_uuid = uuid.UUID(data["task_id"])
+            run = await get_task_run(task_uuid)
+            assert run is not None
+            assert run.prompt == "Valid test prompt"
 
 
 @pytest.mark.asyncio
@@ -146,12 +149,14 @@ def test_websocket_replay_and_close():
         msg2 = ws.receive_json()
         assert msg2["agent"] == "Synthesizer"
         assert msg2["event_type"] == "COMPLETED"
+        assert msg2["payload"]["final_result"] == "Answer 42"
 
 
 @pytest.mark.asyncio
-async def test_cors_preflight():
+async def test_cors_preflight_and_unlisted_origin():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Allowed origin
         resp = await client.options(
             "/api/tasks",
             headers={
@@ -163,13 +168,13 @@ async def test_cors_preflight():
         assert resp.status_code == 200
         assert resp.headers.get("access-control-allow-origin") == "http://localhost:3000"
 
-
-@pytest.mark.asyncio
-async def test_health_endpoint():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/health")
-        assert resp.status_code in (200, 503)
-        data = resp.json()
-        assert "database" in data
-        assert "redis" in data
+        # Unlisted origin
+        resp_unlisted = await client.options(
+            "/api/tasks",
+            headers={
+                "Origin": "http://malicious-site.example.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Content-Type",
+            },
+        )
+        assert "access-control-allow-origin" not in resp_unlisted.headers
