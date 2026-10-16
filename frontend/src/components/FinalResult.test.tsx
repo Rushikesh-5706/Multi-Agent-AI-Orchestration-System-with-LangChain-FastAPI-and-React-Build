@@ -14,7 +14,7 @@ describe("FinalResult", () => {
     expect(screen.getByText("Critical failure in agent workflow")).toBeInTheDocument();
   });
 
-  it("renders final result with copy button", () => {
+  it("renders final result with copy button", async () => {
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockImplementation(() => Promise.resolve()),
@@ -27,7 +27,7 @@ describe("FinalResult", () => {
 
     const copyBtn = screen.getByRole("button", { name: /copy result/i });
     expect(copyBtn).toBeInTheDocument();
-    act(() => {
+    await act(async () => {
       fireEvent.click(copyBtn);
     });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Tokyo is 18C, pack a windbreaker.");

@@ -84,7 +84,7 @@ export function useAgentWebSocket(taskId: string | null): UseAgentWebSocketRetur
             isTerminalRef.current = true;
             setIsFinished(true);
             const result =
-              agentEvent.payload?.final_answer || agentEvent.message || "Completed";
+              agentEvent.payload?.final_result || agentEvent.message || "Completed";
             setFinalResult(result);
             setConnectionState("closed");
             ws.close(1000);

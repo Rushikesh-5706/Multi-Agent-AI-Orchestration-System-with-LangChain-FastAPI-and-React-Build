@@ -22,8 +22,10 @@ export const App: React.FC = () => {
     try {
       const response = await submitTask(prompt);
       setCurrentTaskId(response.task_id);
-    } catch (err: any) {
-      setFormError(err.message || "Failed to start orchestration task.");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to start orchestration task.";
+      setFormError(message);
     } finally {
       setIsSubmitting(false);
     }

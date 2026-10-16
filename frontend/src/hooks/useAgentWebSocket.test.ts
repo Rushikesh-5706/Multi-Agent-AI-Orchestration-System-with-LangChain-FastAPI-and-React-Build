@@ -8,7 +8,7 @@ class MockWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: ((event: { code: number; reason?: string }) => void) | null = null;
-  onerror: ((error: any) => void) | null = null;
+  onerror: ((error: unknown) => void) | null = null;
   readyState: number = 0;
 
   constructor(url: string) {
@@ -31,15 +31,13 @@ class MockWebSocket {
 }
 
 describe("useAgentWebSocket", () => {
-  const originalWebSocket = globalThis.WebSocket;
-
   beforeEach(() => {
     MockWebSocket.instances = [];
-    (globalThis as any).WebSocket = MockWebSocket;
+    vi.stubGlobal("WebSocket", MockWebSocket);
   });
 
   afterEach(() => {
-    globalThis.WebSocket = originalWebSocket;
+    vi.unstubAllGlobals();
     vi.clearAllTimers();
   });
 
@@ -87,7 +85,7 @@ describe("useAgentWebSocket", () => {
       });
     });
 
-    // Send duplicate event
+    // Send duplicate event (replay de-duplication)
     act(() => {
       ws.onmessage?.({
         data: JSON.stringify({
@@ -107,7 +105,7 @@ describe("useAgentWebSocket", () => {
     expect(result.current.events[0].event_id).toBe("evt-1");
   });
 
-  it("handles terminal COMPLETED event", async () => {
+  it("handles terminal COMPLETED event with final_result key", async () => {
     const { result } = renderHook(() => useAgentWebSocket("task-456"));
 
     await act(async () => {
@@ -125,7 +123,7 @@ describe("useAgentWebSocket", () => {
           event_type: "COMPLETED",
           agent: "system",
           message: "Everything done",
-          payload: { final_answer: "Final synthesis result" },
+          payload: { final_result: "Final synthesis result" },
           timestamp: new Date().toISOString(),
         }),
       });
@@ -163,5 +161,31 @@ describe("useAgentWebSocket", () => {
     expect(result.current.isFinished).toBe(true);
     expect(result.current.error).toBe("API key invalid");
     expect(result.current.connectionState).toBe("closed");
+  });
+
+  it("reconnects with exponential delay on abnormal disconnect", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useAgentWebSocket("task-reconn"));
+
+    // Initial connection
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
+    expect(MockWebSocket.instances.length).toBe(1);
+
+    // Simulate unexpected drop (code 1006)
+    act(() => {
+      MockWebSocket.instances[0].close(1006);
+    });
+
+    expect(result.current.connectionState).toBe("reconnecting");
+
+    // First reconnect delay is 1000ms
+    act(() => {
+      vi.advanceTimersByTime(1050);
+    });
+
+    expect(MockWebSocket.instances.length).toBe(2);
+    vi.useRealTimers();
   });
 });

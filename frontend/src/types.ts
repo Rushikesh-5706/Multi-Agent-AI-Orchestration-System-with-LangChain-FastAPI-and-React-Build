@@ -7,6 +7,24 @@ export type EventType =
   | "COMPLETED"
   | "HEARTBEAT";
 
+export interface EventPayload {
+  kind?: string;
+  steps?: string[];
+  step_index?: number;
+  step?: string;
+  tool?: string;
+  arguments?: Record<string, unknown>;
+  result?: string;
+  is_error?: boolean;
+  duration_ms?: number;
+  node?: string;
+  execution?: string;
+  fatal?: boolean;
+  final_result?: string;
+  detail?: string;
+  [key: string]: unknown;
+}
+
 export interface AgentEvent {
   event_id: string;
   sequence: number;
@@ -14,7 +32,7 @@ export interface AgentEvent {
   event_type: EventType;
   agent: string;
   message: string;
-  payload: Record<string, any>;
+  payload: EventPayload;
   timestamp: string;
 }
 
@@ -22,15 +40,4 @@ export type ConnectionState = "connecting" | "live" | "reconnecting" | "closed";
 
 export interface TaskResponse {
   task_id: string;
-}
-
-export interface TaskRunData {
-  id: string;
-  prompt: string;
-  status: string;
-  final_result: string | null;
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  events: AgentEvent[];
 }

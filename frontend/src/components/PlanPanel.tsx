@@ -16,9 +16,9 @@ export const PlanPanel: React.FC<PlanPanelProps> = ({ events }) => {
       if (Array.isArray(event.payload.steps)) {
         steps = event.payload.steps;
       }
-    } else if (event.payload?.kind === "step_started") {
+    } else if (event.payload?.kind === "step_started" && typeof event.payload?.step_index === "number") {
       currentStepIndex = event.payload.step_index;
-    } else if (event.payload?.kind === "finding") {
+    } else if (event.payload?.kind === "finding" && typeof event.payload?.step_index === "number") {
       completedStepIndices.add(event.payload.step_index);
     }
   }
