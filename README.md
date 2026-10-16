@@ -111,7 +111,7 @@ sequenceDiagram
 | Distributed Queue | Celery | 5.6.3 | Asynchronous tool execution |
 | Frontend Library | React | 18.3.1 | User interface with live timeline |
 | Build Tool | Vite | 8.3.4 | Development server and production bundler |
-| Type System | TypeScript | 5.6.3 | Strict static type checking |
+| Type System | TypeScript | 5.9.3 | Strict static type checking |
 | Web Server | Nginx | 1.27-alpine | Nginx 1.27 static file server |
 
 ---
