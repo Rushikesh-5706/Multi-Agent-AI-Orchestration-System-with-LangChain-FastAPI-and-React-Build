@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 import urllib.parse
 
 import requests
 import websockets
-import asyncio
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Watch multi-agent workflow execution")
-    parser.add_argument("prompt", nargs="?", default="What is the current weather in Tokyo, and based on that, what should I pack?", help="Prompt to submit")
-    parser.add_argument("--api-url", default="http://localhost:8000", help="Base API URL")
+    parser.add_argument(
+        "prompt",
+        nargs="?",
+        default="What is the current weather in Tokyo, and based on that, what should I pack?",
+        help="Prompt to submit",
+    )
+    parser.add_argument(
+        "--api-url", default="http://localhost:8000", help="Base API URL"
+    )
     return parser.parse_args()
 
 
@@ -34,20 +41,27 @@ async def stream_events(ws_url: str) -> int:
 
                 payload = data.get("payload", {})
                 if event_type == "TOOL_INVOCATION":
-                    print(f"    Tool: {payload.get('tool')} | Args: {payload.get('arguments')}")
+                    print(
+                        f"    Tool: {payload.get('tool')} | Args: {payload.get('arguments')}"
+                    )
                 elif event_type == "TOOL_RESULT":
-                    print(f"    Result ({payload.get('duration_ms')}ms): {payload.get('result')}")
+                    print(
+                        f"    Result ({payload.get('duration_ms')}ms): {payload.get('result')}"
+                    )
                 elif event_type == "COMPLETED":
                     print("\nFinal Result:")
                     print(payload.get("final_result", msg))
                     return 0
-                elif event_type == "ERROR":
-                    if payload.get("fatal", False):
-                        print(f"Fatal error: {msg}", file=sys.stderr)
-                        return 1
+                elif event_type == "ERROR" and payload.get("fatal", False):
+                    print(f"Fatal error: {msg}", file=sys.stderr)
+                    return 1
     except websockets.exceptions.ConnectionClosedOK:
         return exit_code
-    except Exception as exc:
+    except (
+        websockets.exceptions.WebSocketException,
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
         print(f"WebSocket error: {exc}", file=sys.stderr)
         return 1
     return exit_code
@@ -61,7 +75,7 @@ def main() -> int:
     try:
         resp = requests.post(post_url, json={"prompt": args.prompt}, timeout=10)
         resp.raise_for_status()
-    except Exception as exc:
+    except requests.RequestException as exc:
         print(f"Failed to submit task: {exc}", file=sys.stderr)
         return 1
 
