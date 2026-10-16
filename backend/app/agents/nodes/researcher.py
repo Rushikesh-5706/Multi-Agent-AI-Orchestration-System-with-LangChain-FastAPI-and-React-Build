@@ -61,6 +61,7 @@ async def researcher_node(state: AgentState, config: RunnableConfig) -> dict:
         total_steps=total_steps,
         current_step=current_step,
         original_prompt=state["prompt"],
+        prior_findings=_format_prior_findings(state["findings"]),
         max_tool_iterations=settings.MAX_TOOL_ITERATIONS,
     )
 
@@ -102,9 +103,35 @@ async def researcher_node(state: AgentState, config: RunnableConfig) -> dict:
 
             spec = get_spec_by_name(tool_name)
             if spec is None:
+                await publisher.emit(
+                    task_id=task_id,
+                    event_type=EventType.TOOL_INVOCATION,
+                    agent_name="tool_executor",
+                    message=f"Invoking unknown tool '{tool_name}'",
+                    payload={
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "execution": "unknown",
+                    },
+                )
                 tool_result = (
                     f"Error: Unknown tool '{tool_name}'. "
                     "Use one of: web_search, get_weather, data_calculator."
+                )
+                await publisher.emit(
+                    task_id=task_id,
+                    event_type=EventType.TOOL_RESULT,
+                    agent_name="tool_executor",
+                    message=f"Unknown tool '{tool_name}' rejected",
+                    payload={
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "execution": "unknown",
+                        "celery_task_id": None,
+                        "result": tool_result,
+                        "is_error": True,
+                        "duration_ms": 0,
+                    },
                 )
                 had_errors = True
             else:
@@ -139,3 +166,13 @@ async def researcher_node(state: AgentState, config: RunnableConfig) -> dict:
         "findings": [finding],
         "messages": [{"agent": "Researcher", "content": compressed_finding}],
     }
+
+
+def _format_prior_findings(findings: list) -> str:
+    if not findings:
+        return "None yet."
+    parts = []
+    for f in findings:
+        status = " (had errors)" if f.get("had_errors") else ""
+        parts.append(f"Step {f['step_index'] + 1}: {f['step']}\n  Finding: {f['finding']}{status}")
+    return "\n".join(parts)

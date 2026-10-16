@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
+import groq
 from langchain_groq import ChatGroq
 
 from app.core.config import get_settings
@@ -36,16 +38,15 @@ async def invoke_with_retry(llm, messages: list, publisher=None, task_id: str = 
     for attempt in range(max_retries + 1):
         try:
             return await llm.ainvoke(messages)
-        except Exception as exc:
+
+        except groq.AuthenticationError as exc:
+            raise LLMConfigurationError(
+                f"Groq API key is invalid or not authorized: {exc}"
+            ) from exc
+
+        except groq.BadRequestError as exc:
             exc_str = str(exc).lower()
-            exc_type = type(exc).__name__
-
-            if "authentication" in exc_str or "401" in exc_str or "invalid_api_key" in exc_str:
-                raise LLMConfigurationError(
-                    f"Groq API key is invalid or not authorized: {exc}"
-                ) from exc
-
-            if "tool_use_failed" in exc_str or "tool_calls" in exc_str:
+            if "tool_use_failed" in exc_str or "tool_calls" in exc_str or "tool" in exc_str:
                 if attempt < 2:
                     corrective = {
                         "role": "user",
@@ -58,46 +59,47 @@ async def invoke_with_retry(llm, messages: list, publisher=None, task_id: str = 
                     messages = list(messages) + [corrective]
                     logger.warning("Tool schema error on attempt %d, retrying", attempt + 1)
                     continue
-                raise
-
-            if "rate_limit" in exc_str or "rate limit" in exc_str or "429" in exc_str:
-                rate_limit_max = max(max_retries, 5)
-                if attempt >= rate_limit_max:
-                    raise
-                wait = backoff * (2**attempt)
-                import re
-
-                match = re.search(r"(?:retry.after|try again in)[:\s]+(\d+(?:\.\d+)?)", exc_str)
-                if match:
-                    wait = max(float(match.group(1)) + 0.5, 2.0)
-
-                if publisher and task_id:
-                    from app.core.enums import EventType
-
-                    await publisher.emit(
-                        task_id=task_id,
-                        event_type=EventType.AGENT_ACTION,
-                        agent_name="system",
-                        message=f"Rate limit reached; waiting {wait:.0f}s before retry.",
-                        payload={"kind": "rate_limit_wait", "wait_seconds": wait},
-                    )
-                logger.warning("Rate limit on attempt %d, waiting %.1fs", attempt + 1, wait)
-                await asyncio.sleep(wait)
-                continue
-
-            if any(x in exc_str for x in ["connection", "timeout", "5xx", "500", "502", "503"]):
-                if attempt >= max_retries:
-                    raise
-                wait = backoff * (2**attempt)
-                logger.warning(
-                    "Transient LLM error '%s' on attempt %d, retrying in %.1fs",
-                    exc_type,
-                    attempt + 1,
-                    wait,
-                )
-                await asyncio.sleep(wait)
-                continue
-
             raise
+
+        except groq.RateLimitError as exc:
+            rate_limit_max = max(max_retries, 5)
+            if attempt >= rate_limit_max:
+                raise
+            wait = backoff * (2**attempt)
+            exc_str = str(exc)
+            match = re.search(r"(?:retry.after|try again in)[:\s]+(\d+(?:\.\d+)?)", exc_str)
+            if match:
+                wait = max(float(match.group(1)) + 0.5, 2.0)
+
+            if publisher and task_id:
+                from app.core.enums import EventType
+
+                await publisher.emit(
+                    task_id=task_id,
+                    event_type=EventType.AGENT_ACTION,
+                    agent_name="system",
+                    message=f"Rate limit reached; waiting {wait:.0f}s before retry.",
+                    payload={"kind": "rate_limit_wait", "wait_seconds": wait},
+                )
+            logger.warning("Rate limit on attempt %d, waiting %.1fs", attempt + 1, wait)
+            await asyncio.sleep(wait)
+            continue
+
+        except (
+            groq.APIConnectionError,
+            groq.APITimeoutError,
+            groq.InternalServerError,
+        ) as exc:
+            if attempt >= max_retries:
+                raise
+            wait = backoff * (2**attempt)
+            logger.warning(
+                "Transient LLM error '%s' on attempt %d, retrying in %.1fs",
+                type(exc).__name__,
+                attempt + 1,
+                wait,
+            )
+            await asyncio.sleep(wait)
+            continue
 
     raise RuntimeError("Exhausted retries without a result or a raised exception.")

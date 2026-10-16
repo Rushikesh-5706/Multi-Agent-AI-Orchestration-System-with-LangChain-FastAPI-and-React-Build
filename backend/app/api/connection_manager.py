@@ -5,7 +5,11 @@ import logging
 from collections import defaultdict
 from datetime import UTC
 
+from app.core.enums import EventType
+
 logger = logging.getLogger(__name__)
+
+_TERMINAL_EVENT_TYPES = {EventType.COMPLETED.value, EventType.ERROR.value}
 
 
 class _Connection:
@@ -61,8 +65,15 @@ class ConnectionManager:
         for conn in dead:
             self.remove(task_id, conn)
 
-    async def replay_and_stream(self, task_id: str, conn: _Connection, task_uuid) -> None:
+    async def replay_and_stream(self, task_id: str, conn: _Connection, task_uuid) -> bool:
+        """Replay persisted events to the connection while holding its send lock.
+
+        Returns True if a terminal event (COMPLETED or fatal ERROR) was among
+        the replayed events, meaning the caller should close the socket.
+        """
         from app.db.repositories import list_agent_events
+
+        terminal_found = False
 
         async with conn._lock:
             events = await list_agent_events(task_uuid, after_sequence=0)
@@ -83,6 +94,13 @@ class ConnectionManager:
                 }
                 await conn.ws.send_json(wire)
                 conn.last_sequence = event.sequence
+
+                if event.event_type == EventType.COMPLETED.value:
+                    terminal_found = True
+                elif event.event_type == EventType.ERROR.value and event.payload.get("fatal"):
+                    terminal_found = True
+
+        return terminal_found
 
 
 _manager: ConnectionManager | None = None

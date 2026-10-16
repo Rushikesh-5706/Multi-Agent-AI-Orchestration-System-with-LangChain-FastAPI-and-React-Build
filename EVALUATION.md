@@ -88,6 +88,9 @@ Current step ({step_index} of {total_steps}): {current_step}
 
 Original user prompt for context: {original_prompt}
 
+Findings from earlier steps (for context only, do not repeat this work):
+{prior_findings}
+
 Tools you may call:
 - web_search: Search the web with DuckDuckGo. Use for general facts, news and background info.
 - get_weather: Get current weather for a location. Requires a city and country code.

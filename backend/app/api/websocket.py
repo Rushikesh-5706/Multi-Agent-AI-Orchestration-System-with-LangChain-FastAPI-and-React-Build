@@ -39,26 +39,22 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
     await websocket.accept()
     manager = get_connection_manager()
     conn = _Connection(websocket, task_id)
+
+    # Register before replay so live broadcasts during replay are queued behind
+    # the per-connection lock. After replay the lock is released and broadcasts
+    # deliver only events whose sequence exceeds last_sequence, preventing dupes.
     manager.register(task_id, conn)
 
     already_finished = False
 
     try:
-        await manager.replay_and_stream(task_id, conn, task_uuid)
-
-        from app.db.repositories import list_agent_events
-
-        replayed = await list_agent_events(task_uuid, after_sequence=0)
-        for event in replayed:
-            if event.event_type == EventType.COMPLETED.value:
-                already_finished = True
-                break
-            if event.event_type == EventType.ERROR.value and event.payload.get("fatal"):
-                already_finished = True
-                break
+        already_finished = await manager.replay_and_stream(task_id, conn, task_uuid)
 
         if already_finished:
-            await websocket.close(code=1000)
+            try:
+                await websocket.close(code=1000)
+            except Exception:
+                pass
             return
 
         heartbeat_interval = settings.WS_HEARTBEAT_SECONDS
