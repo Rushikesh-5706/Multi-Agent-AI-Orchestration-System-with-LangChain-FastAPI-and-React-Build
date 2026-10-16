@@ -8,10 +8,10 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 
 from app.agents.events import EventPublisher
-from app.agents.llm import invoke_with_retry
+from app.agents.llm import LLMConfigurationError, invoke_with_retry
 from app.agents.prompts import RESEARCHER_SYSTEM_PROMPT
 from app.agents.state import AgentState, Finding
-from app.agents.tool_executor import execute_tool, get_spec_by_name
+from app.agents.tool_executor import execute_named_tool
 from app.core.config import get_settings
 from app.core.enums import EventType
 from app.tools.registry import get_tool_registry
@@ -61,7 +61,7 @@ async def researcher_node(state: AgentState, config: RunnableConfig) -> dict:
         total_steps=total_steps,
         current_step=current_step,
         original_prompt=state["prompt"],
-        prior_findings=_format_prior_findings(state["findings"]),
+        previous_findings=_format_previous_findings(state.get("findings", [])),
         max_tool_iterations=settings.MAX_TOOL_ITERATIONS,
     )
 
@@ -71,7 +71,22 @@ async def researcher_node(state: AgentState, config: RunnableConfig) -> dict:
     finding_text = ""
 
     for iteration in range(settings.MAX_TOOL_ITERATIONS + 1):
-        response = await invoke_with_retry(bound_llm, step_messages, publisher, task_id)
+        try:
+            response = await invoke_with_retry(bound_llm, step_messages, publisher, task_id)
+        except LLMConfigurationError as exc:
+            return {"fatal_error": str(exc)}
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            had_errors = True
+            finding_text = f"Unavailable: the model request failed ({exc_name})."
+            await publisher.emit(
+                task_id=task_id,
+                event_type=EventType.ERROR,
+                agent_name="Researcher",
+                message=f"Step {step_index + 1} model request failed: {exc}",
+                payload={"fatal": False, "kind": "llm_failure", "step_index": step_index},
+            )
+            break
 
         if hasattr(response, "content") and response.content:
             await publisher.emit(
@@ -101,45 +116,11 @@ async def researcher_node(state: AgentState, config: RunnableConfig) -> dict:
             tool_args = tool_call.get("args") or {}
             tool_call_id = tool_call.get("id", "")
 
-            spec = get_spec_by_name(tool_name)
-            if spec is None:
-                await publisher.emit(
-                    task_id=task_id,
-                    event_type=EventType.TOOL_INVOCATION,
-                    agent_name="tool_executor",
-                    message=f"Invoking unknown tool '{tool_name}'",
-                    payload={
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "execution": "unknown",
-                    },
-                )
-                tool_result = (
-                    f"Error: Unknown tool '{tool_name}'. "
-                    "Use one of: web_search, get_weather, data_calculator."
-                )
-                await publisher.emit(
-                    task_id=task_id,
-                    event_type=EventType.TOOL_RESULT,
-                    agent_name="tool_executor",
-                    message=f"Unknown tool '{tool_name}' rejected",
-                    payload={
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "execution": "unknown",
-                        "celery_task_id": None,
-                        "result": tool_result,
-                        "is_error": True,
-                        "duration_ms": 0,
-                    },
-                )
+            tool_result = await execute_named_tool(tool_name, tool_args, publisher, task_id)
+            if tool_result.startswith("Error:"):
                 had_errors = True
-            else:
-                tool_result = await execute_tool(spec, tool_args, publisher, task_id)
-                if tool_result.startswith("Error:"):
-                    had_errors = True
-                if tool_name not in tools_used:
-                    tools_used.append(tool_name)
+            if tool_name not in tools_used:
+                tools_used.append(tool_name)
 
             step_messages.append(ToolMessage(content=tool_result, tool_call_id=tool_call_id))
 
@@ -164,15 +145,13 @@ async def researcher_node(state: AgentState, config: RunnableConfig) -> dict:
     return {
         "current_step": step_index + 1,
         "findings": [finding],
-        "messages": [{"agent": "Researcher", "content": compressed_finding}],
     }
 
 
-def _format_prior_findings(findings: list) -> str:
+def _format_previous_findings(findings: list[Finding]) -> str:
     if not findings:
         return "None yet."
-    parts = []
-    for f in findings:
-        status = " (had errors)" if f.get("had_errors") else ""
-        parts.append(f"Step {f['step_index'] + 1}: {f['step']}\n  Finding: {f['finding']}{status}")
-    return "\n".join(parts)
+    lines = [f"Step {f['step_index'] + 1} ({f['step']}): {f['finding']}" for f in findings]
+    while lines and len("\n".join(lines)) > 1800:
+        lines.pop(0)
+    return "\n".join(lines)

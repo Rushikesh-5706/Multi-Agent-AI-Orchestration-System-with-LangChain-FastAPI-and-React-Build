@@ -22,6 +22,10 @@ def _after_researcher(state: AgentState) -> str:
     return "synthesizer"
 
 
+def _after_synthesizer(state: AgentState) -> str:
+    return END
+
+
 def build_graph():
     graph = StateGraph(AgentState)
 
@@ -36,6 +40,6 @@ def build_graph():
         _after_researcher,
         {"researcher": "researcher", "synthesizer": "synthesizer", END: END},
     )
-    graph.add_edge("synthesizer", END)
+    graph.add_conditional_edges("synthesizer", _after_synthesizer, {END: END})
 
     return graph.compile()

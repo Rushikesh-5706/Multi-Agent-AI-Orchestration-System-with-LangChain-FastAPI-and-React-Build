@@ -28,6 +28,7 @@ value is the array:
 Hard rules:
 - Between 1 and {max_plan_steps} steps.
 - Each step must describe a concrete research action (search, look up, calculate).
+- A step may rely on the result of an earlier step and should say so in words ("using the temperature found in step 1").
 - Do not include steps that merely summarize or format; that is the Synthesizer's role.
 - Do not invent facts. Your output is a plan, not an answer.
 - Honesty rule: if you cannot determine what steps are needed, produce a single step
@@ -46,8 +47,9 @@ Current step ({step_index} of {total_steps}): {current_step}
 
 Original user prompt for context: {original_prompt}
 
-Findings from earlier steps (for context only, do not repeat this work):
-{prior_findings}
+Earlier findings:
+{previous_findings}
+Reuse these values where relevant and do not re-fetch data they already contain.
 
 Tools you may call:
 - web_search: Search the web with DuckDuckGo. Use for general facts, news and background info.

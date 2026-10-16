@@ -60,8 +60,8 @@ async def planner_node(state: AgentState, config: RunnableConfig) -> dict:
                     ),
                 }
             )
-        except LLMConfigurationError:
-            raise
+        except LLMConfigurationError as exc:
+            return {"fatal_error": str(exc)}
         except Exception as exc:
             last_error = str(exc)
             logger.error("Planner LLM error: %s", exc)
@@ -89,7 +89,6 @@ async def planner_node(state: AgentState, config: RunnableConfig) -> dict:
     return {
         "plan": plan,
         "current_step": 0,
-        "messages": [{"agent": "Planner", "content": f"Plan: {plan}"}],
     }
 
 

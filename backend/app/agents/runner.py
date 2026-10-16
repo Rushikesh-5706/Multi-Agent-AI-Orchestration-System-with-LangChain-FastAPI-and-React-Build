@@ -6,7 +6,7 @@ import uuid
 
 from app.agents.events import EventPublisher
 from app.agents.graph import build_graph
-from app.agents.llm import LLMConfigurationError, build_llm
+from app.agents.llm import build_llm
 from app.agents.state import AgentState
 from app.core.config import get_settings
 from app.core.enums import EventType, TaskStatus
@@ -35,7 +35,6 @@ async def run_workflow(task_id: str, connection_manager=None) -> None:
         "plan": [],
         "current_step": 0,
         "findings": [],
-        "messages": [],
         "final_answer": None,
         "fatal_error": None,
     }
@@ -85,7 +84,7 @@ async def run_workflow(task_id: str, connection_manager=None) -> None:
                 event_type=EventType.COMPLETED,
                 agent_name="system",
                 message=final_answer,
-                payload={"final_answer": final_answer},
+                payload={"final_result": final_answer},
             )
         else:
             await set_task_status(task_uuid, TaskStatus.FAILED)
@@ -96,11 +95,6 @@ async def run_workflow(task_id: str, connection_manager=None) -> None:
                 message="Workflow ended without producing a final answer.",
                 payload={"fatal": True},
             )
-
-    except LLMConfigurationError as exc:
-        msg = str(exc)
-        logger.error("LLM configuration error for task %s: %s", task_id, msg)
-        await _fail_run(task_uuid, task_id, publisher, msg)
 
     except TimeoutError:
         msg = f"Workflow timed out after {settings.WORKFLOW_TIMEOUT_SECONDS}s."

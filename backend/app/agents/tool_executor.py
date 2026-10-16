@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Any
+
+from celery.exceptions import TimeoutError as CeleryTimeoutError
 
 from app.core.config import get_settings
 from app.core.enums import EventType
@@ -11,21 +14,88 @@ from app.tools.registry import ToolSpec, get_tool_registry
 logger = logging.getLogger(__name__)
 
 
-async def execute_tool(
-    spec: ToolSpec,
-    arguments: dict,
-    publisher,
+async def execute_named_tool(
+    name: str,
+    arguments: dict[str, Any],
+    publisher: Any,
     task_id: str,
 ) -> str:
-    settings = get_settings()
+    spec = get_spec_by_name(name)
+    if spec is None:
+        await publisher.emit(
+            task_id=task_id,
+            event_type=EventType.TOOL_INVOCATION,
+            agent_name="tool_executor",
+            message=f"Invoking unknown tool '{name}'",
+            payload={
+                "tool": name,
+                "arguments": arguments,
+                "execution": "rejected",
+            },
+        )
+        tool_result = (
+            f"Error: Unknown tool '{name}'. Use one of: web_search, get_weather, data_calculator."
+        )
+        await publisher.emit(
+            task_id=task_id,
+            event_type=EventType.TOOL_RESULT,
+            agent_name="tool_executor",
+            message=f"Unknown tool '{name}' rejected",
+            payload={
+                "tool": name,
+                "arguments": arguments,
+                "execution": "rejected",
+                "celery_task_id": None,
+                "result": tool_result,
+                "is_error": True,
+                "duration_ms": 0,
+            },
+        )
+        return tool_result
 
     try:
         validated = spec.args_schema(**arguments)
         validated_args = validated.model_dump()
     except Exception as exc:
+        await publisher.emit(
+            task_id=task_id,
+            event_type=EventType.TOOL_INVOCATION,
+            agent_name="tool_executor",
+            message=f"Invoking tool '{spec.name}' with invalid arguments",
+            payload={
+                "tool": spec.name,
+                "arguments": arguments,
+                "execution": "rejected",
+            },
+        )
         msg = f"Error: Tool arguments failed validation for '{spec.name}': {exc}"
+        await publisher.emit(
+            task_id=task_id,
+            event_type=EventType.TOOL_RESULT,
+            agent_name="tool_executor",
+            message=f"Tool '{spec.name}' arguments rejected",
+            payload={
+                "tool": spec.name,
+                "arguments": arguments,
+                "execution": "rejected",
+                "celery_task_id": None,
+                "result": msg,
+                "is_error": True,
+                "duration_ms": 0,
+            },
+        )
         return msg
 
+    return await execute_tool(spec, validated_args, publisher, task_id)
+
+
+async def execute_tool(
+    spec: ToolSpec,
+    validated_args: dict[str, Any],
+    publisher: Any,
+    task_id: str,
+) -> str:
+    settings = get_settings()
     celery_task_id = None
     start_ms = time.monotonic()
 
@@ -59,39 +129,26 @@ async def execute_tool(
 
             raw_result = await asyncio.to_thread(async_result.get, settings.TOOL_TIMEOUT_SECONDS)
             result = str(raw_result)
-        except TimeoutError:
+        except (TimeoutError, CeleryTimeoutError):
             if celery_task_id:
                 try:
                     await asyncio.to_thread(
                         lambda: celery_app.control.revoke(celery_task_id, terminate=True)
                     )
-                except Exception:
-                    pass
+                except Exception as revoke_exc:
+                    logger.warning(
+                        "Failed to revoke Celery task %s: %s", celery_task_id, revoke_exc
+                    )
             result = (
                 f"Error: Tool '{spec.name}' timed out after "
                 f"{settings.TOOL_TIMEOUT_SECONDS}s. "
                 "Retry with a simpler query or use a different approach."
             )
         except Exception as exc:
-            timeout = settings.TOOL_TIMEOUT_SECONDS
-            exc_str = str(exc)
-            if "timed out" in exc_str.lower() or "timeout" in exc_str.lower():
-                if celery_task_id:
-                    try:
-                        await asyncio.to_thread(
-                            lambda: celery_app.control.revoke(celery_task_id, terminate=True)
-                        )
-                    except Exception:
-                        pass
-                result = (
-                    f"Error: Tool '{spec.name}' timed out after {timeout}s. "
-                    "Retry with a simpler query or use a different approach."
-                )
-            else:
-                logger.warning("Celery task error for '%s': %s", spec.name, exc)
-                result = (
-                    f"Error: Tool '{spec.name}' failed to execute: {exc}. Try a different approach."
-                )
+            logger.warning("Celery task error for '%s': %s", spec.name, exc)
+            result = (
+                f"Error: Tool '{spec.name}' failed to execute: {exc}. Try a different approach."
+            )
     else:
         try:
             result = spec.runner(**validated_args)

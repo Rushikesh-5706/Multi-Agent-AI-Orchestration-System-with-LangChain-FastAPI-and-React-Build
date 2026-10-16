@@ -46,10 +46,12 @@ async def synthesizer_node(state: AgentState, config: RunnableConfig) -> dict:
         HumanMessage(content="Please synthesize the findings into a final answer now."),
     ]
 
-    response = await invoke_with_retry(llm, messages, publisher, task_id)
-    final_answer = response.content if hasattr(response, "content") else str(response)
+    try:
+        response = await invoke_with_retry(llm, messages, publisher, task_id)
+        final_answer = response.content if hasattr(response, "content") else str(response)
+    except Exception as exc:
+        return {"fatal_error": f"Synthesizer failed to produce an answer: {exc}"}
 
     return {
         "final_answer": final_answer,
-        "messages": [{"agent": "Synthesizer", "content": final_answer}],
     }

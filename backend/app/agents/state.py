@@ -18,6 +18,5 @@ class AgentState(TypedDict):
     plan: list[str]
     current_step: int
     findings: Annotated[list[Finding], operator.add]
-    messages: Annotated[list[dict], operator.add]
     final_answer: str | None
     fatal_error: str | None
