@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     REDIS_URL: str
     LLM_API_KEY: str
-    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_MODEL: str = "qwen/qwen3.8-27b"
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_RETRIES: int = 3
 
